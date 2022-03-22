@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang = "ru">
+    <head>
+        <meta charset = "utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>ValantisTest</title>
+        <style>
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            }
+
+            #tooltip {
+                position: absolute;
+                padding: .3rem;
+                background-color: rgba(0,0,0,.9);
+                display: none;
+                color: white;
+                border-radius: .3rem;
+            }
+
+            #lightbox {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: rgba(0,0,0,.7);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                visibility: hidden;
+                opacity: 0;
+                transition: opacity .2s;
+            }
+
+            #modal {
+                width: 70%;
+                background-color: gray;
+                border-width: 0 1rem 1rem 1rem;
+                border-color: gray;
+                border-style: solid;
+                max-height: 80%;
+                overflow: auto;
+                border-radius: .5rem;
+                position: relative;
+            }
+
+            /* Присоединяет заголовок к скроллящейся таблице в modal'е для мобильных устройств */
+            #modal h2 {
+                text-align: center;
+                padding: 1rem 0;
+                background-color: gray;
+                position: sticky;
+                top: 0;
+                left: 0;
+            }
+
+            #modal table {
+                margin-bottom: 0;
+            }
+
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 1rem;
+            }
+
+            tr {
+                background-color: #d1e7dd;
+                border-bottom: #bcd0c7 1px solid;
+            }
+
+            thead {
+                border-bottom: 2px black solid;
+            }
+
+            tbody tr:hover {
+                background-color: #c1d6cc;
+            }
+
+            th, td {
+                padding: .5rem .5rem;
+                font-size: 1rem;
+                text-align: left;
+            }
+
+            #close-icon {
+                position: absolute;
+                right: 0;
+                top: 1rem;
+                width: 2rem;
+                z-index: 2;
+            }
+
+            @media (max-aspect-ratio: 91/100) {
+                #close-icon {
+                    display: none;
+                }
+            }
+        </style>
+    </head>
+    <body>
+
+        <table>
+            <thead>
+                <tr>
+                    <th scope = "col">Код</th>
+                    <th scope = "col">Курс</th>
+                    <th scope = "col">Разница, %</th>
+                </tr>
+            </thead>
+            <tbody id = "table-body"> 
+            </tbody>
+        </table>
+
+        <div id = "tooltip"></div>
+
+        <div id = "lightbox">
+            <div id = "modal">
+                <img src = "close.svg" id = "close-icon">
+                <h2></h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th scope = "col">Дата</th>
+                            <th scope = "col">Курс</th>
+                            <th scope = "col">Разница, %</th>
+                        </tr>
+                    </thead>
+                    <tbody id = "modal-table-body"> 
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <a href="https://www.cbr-xml-daily.ru/">&copy; Курсы валют, API</a>
+        
+        <script>
+            
+            // Массив для хранения данных с API
+            const store = [];
+            
+            /*
+            * Выполняется в первую очередь
+            * Добывает все данные за последние 11 дней и помещает их в массив store
+            * Запускает функцию отрисовки основной таблицы
+            */
+            async function renderAll () {
+                let purl;
+                let response = await fetch('https://www.cbr-xml-daily.ru/daily_json.js');
+                let data = await response.json();
+                store.push(data);
+                purl = 'https:'+data['PreviousURL'];
+                for (let i = 0; i < 10; i++) {
+                    response = await fetch(purl);
+                    data = await response.json();
+                    store.push(data);
+                    purl = 'https:'+data['PreviousURL'];
+                };
+                renderTable();
+            };
+            
+            /*
+            * Отрисовывает основную таблицу из данных за сегодняшний день с учётом номинала
+            * Заносит полное название валюты в атрибут tr
+            * Присоединяет обработчики событий для tooltip'а и клика для открытия доп. таблицы
+            */
+            function renderTable () {
+                for (const valuteCode in store[0]['Valute']) {
+                    const valute = store[0]['Valute'][valuteCode];
+                    const row = `<tr data-title = "${valute['Name']}">
+                                    <td>${valute['CharCode']}</td>
+                                    <td>${(valute['Value'] / valute['Nominal']).toFixed(4)}</td>
+                                    <td>${countTrend(valuteCode, 0)}</td>
+                                </tr>`;
+                    document.getElementById('table-body').innerHTML += row;
+                };
+    
+                const rows = document.querySelectorAll('tr[data-title]');
+    
+                for (let i = 0; i < rows.length; i++) {
+                    rows[i].addEventListener('mousemove', mouseMoveHandler);
+                    rows[i].addEventListener('mouseleave', () => {document.getElementById('tooltip').style.display = 'none';});
+                    rows[i].addEventListener('click', clickHandler);
+                }
+            };
+
+            /*
+            * Рассчитывает и форматирует процентное изменение курса
+            * @param {String} valuteCode   Буквенный код валюты
+            * @param {Number} day          Более поздний день из двух от 0 до 10
+            * @return {String}              Отформатированное значение изменения курса
+            */
+            function countTrend (valuteCode, day) {
+                const valuteDay = store[day]['Valute'][valuteCode];
+                const valuteDayBefore = store[day+1]['Valute'][valuteCode];
+                let trend = (valuteDay['Value']*valuteDayBefore['Nominal'] / (valuteDayBefore['Value']*valuteDay['Nominal']) * 100 - 100).toFixed(4);
+                if (trend > 0)
+                    trend = '+'+trend;
+                return trend;
+            };
+
+            /*
+            * Обработчик наведения мыши на строку
+            * Записывает полное название валюты в tooltip, отображает его и присоединяет к курсору
+            */
+            function mouseMoveHandler (e) {
+                document.getElementById('tooltip').innerHTML = e.target.parentElement.getAttribute('data-title');
+                document.getElementById('tooltip').style.display = "block";
+                document.getElementById('tooltip').style.left = e.pageX + 'px';
+                document.getElementById('tooltip').style.top = e.pageY + 20 + 'px';
+            };
+
+            /*
+            * Обработчик клика по строке
+            * Запускает отрисовку таблицы внутри modal'а
+            * Открывает lightbox и присоединяет обработчики для его закрытия
+            */
+            function clickHandler (e) {
+                renderModalTable(e.target.parentElement.firstElementChild.innerHTML);
+                document.getElementById('lightbox').style.visibility = 'visible';
+                document.getElementById('lightbox').style.opacity = 1;
+                document.getElementById('lightbox').addEventListener('click', (e) => {
+                    if (e.target.id == 'lightbox' || e.target.id == 'close-icon') {
+                        document.getElementById('lightbox').style.opacity = 0;
+                        setTimeout(() => {
+                            document.getElementById('lightbox').style.visibility = 'hidden';
+                        }, 200);      
+                    };
+                });
+            };
+
+            /*
+            * Отрисовывает таблицу внутри modal'а с учётом номинала
+            * @param {String} valuteCode   Буквенный код валюты
+            */
+            function renderModalTable (valuteCode) {
+                document.getElementById('modal-table-body').innerHTML = '';
+                document.querySelector('#modal h2').innerHTML = store[0]['Valute'][valuteCode]['Name'];
+                for (let i = 0; i < 10; i++) {
+                    const row = `<tr>
+                                    <td>${store[i]['Date'].slice(0, 10)}</td>
+                                    <td>${(store[i]['Valute'][valuteCode]['Value'] / store[i]['Valute'][valuteCode]['Nominal']).toFixed(4)}</td>
+                                    <td>${countTrend(valuteCode, i)}</td>
+                                </tr>`;
+                    document.getElementById('modal-table-body').innerHTML += row;
+                };
+            };
+
+            renderAll();
+
+        </script>
+    </body>
+</html>
